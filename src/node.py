@@ -8,28 +8,44 @@ class NodeType(Enum):
 	STRING = 3
 	INT = 4
 	FLOAT = 5
-	TAGGED = 6
 
 NodeValue = str|int|bool|float|list['Node']|dict['Node']
+NodeParent = Union['Node', None]
 
 class Node():
-	def __init__(self, nodeType: NodeType, nodeValue: NodeValue, parentNode: Union['Node', None], nodeTag: str=None) -> None:
-		self.nodeType: NodeType = nodeType
-		self.nodeValue: NodeValue = nodeValue
-		self.nodeTag: str|None = None
-		self.parentNode: Node|None = parentNode
+	def __init__(self, parent: NodeParent, type: NodeType):
+		self.type: NodeType = type
+		self.parent: Node|None = parent
 
 	def __indent__(self, s: str):
 		return '\t' + '\n\t'.join(s.splitlines())
 
-	def __repr__(self) -> str:
-		if self.nodeType == NodeType.ARRAY:
-			return 'Node [\n' + ',\n'.join([ self.__indent__(str(x)) for x in self.nodeValue ]) + '\n]\n'
+	def __indent_il__(self, s: str):
+		return '\n\t'.join(s.splitlines())
 
-		if self.nodeType == NodeType.OBJECT:
-			return 'Node {\n' + ',\n'.join([ self.__indent__(f'{k}: {str(v)}') for k,v in self.nodeValue.items() ]) + '\n}\n'
+class ValueNode(Node):
+	def __init__(self, parent: NodeParent, type: NodeType, value: NodeValue, tag: str|None=None):
+		super().__init__(parent, type)
+		self.value = value
+		self.tag = tag
 
-		if self.nodeType == NodeType.STRING:
-			return 'Node<"'+self.nodeValue+'">'
+	def __repr__(self):
+		out = '<' + (self.tag+':' if self.tag else '') + NodeType(self.type).name + '> '
+		if self.type == NodeType.STRING: return out+'"'+self.__indent_il__(self.value)+'"'
+		return out+str(self.value)
 
-		return 'Node<'+str(self.nodeValue)+'>'
+class ObjectNode(Node):
+	def __init__(self, parent: NodeParent, children: dict[Node]=None):
+		super().__init__(parent, NodeType.OBJECT)
+		self.children: dict[Node] = children or {}
+
+	def __repr__(self):
+		return '{\n' + ',\n'.join([ self.__indent__(f'{k} = {str(v)}') for k,v in self.children.items() ]) + '\n}\n'
+
+class ArrayNode(Node):
+	def __init__(self, parent: NodeParent, children: list[Node]=None):
+		super().__init__(parent, NodeType.ARRAY)
+		self.children: list[Node] = children or []
+
+	def __repr__(self):
+		return '[\n' + ',\n'.join([ self.__indent__(str(x)) for x in self.children ]) + '\n]\n'

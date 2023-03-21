@@ -1,5 +1,5 @@
 from enum import Enum
-from .node import Node, NodeType
+from .node import Node, ValueNode, ArrayNode, ObjectNode, NodeType
 from .tokenizer import RawToken, tokenize
 import re
 
@@ -25,25 +25,25 @@ RE_FLOAT = re.compile('^-?\\d*\\.\\d+$')
 RE_BOOLEAN = re.compile('^(true|false)$', re.IGNORECASE)
 RE_TAGGED = re.compile('^\w+\\:\\".+\\"$')
 
-def parse_type(value: str):
+def parse_value(value: str):
 	if RE_BOOLEAN.match(value): return NodeType.BOOL,  bool(value.lower() == 'true')
 	if RE_INT.match(value):     return NodeType.INT,   int(value)
 	if RE_FLOAT.match(value):   return NodeType.FLOAT, float(value)
-	if RE_TAGGED.match(value):	return NodeType.TAGGED, value
 	return NodeType.STRING, value
 
 def parse_to_node(parent: Node, value: str, quoted: bool=False):
-	if quoted: return Node(NodeType.STRING, value, parent)
-	type, value = parse_type(value)
+	if quoted: return ValueNode(parent, NodeType.STRING, value)
 
-	if type == NodeType.TAGGED:
+	tag = None
+	if RE_TAGGED.match(value):
 		tag, _, value = value.partition(':')
-		return Node(type, value, parent, tag)
+		value = value[1:-1]
+	type, value = parse_value(value)
 
-	return Node(type, value, parent)
+	return ValueNode(parent, type, value, tag)
 
 def parse(text: str):
-	root = Node(NodeType.OBJECT, {}, None)
+	root = ObjectNode(None)
 	node = root
 	key = None
 	state = State.ROOT
@@ -74,7 +74,7 @@ def parse(text: str):
 
 				if type == RawToken.CLOSE_OBJECT:
 					state = State.NONE
-					node = node.parentNode
+					node = node.parent
 					return
 
 				current_line, current_char = get_pos(text, ind)
@@ -95,25 +95,25 @@ def parse(text: str):
 			case State.SEP:
 				if type == RawToken.QUOTED:
 					state = State.NONE
-					node.nodeValue[key] = parse_to_node(node, value, True)
+					node.children[key] = parse_to_node(node, value, True)
 					return
 
 				if type == RawToken.UNQUOTED:
 					state = State.NONE
-					node.nodeValue[key] = parse_to_node(node, value)
+					node.children[key] = parse_to_node(node, value)
 					return
 
 				if type == RawToken.OPEN_OBJECT:
 					state = State.NONE
-					new_node = Node(NodeType.OBJECT, {}, node)
-					node.nodeValue[key] = new_node
+					new_node = ObjectNode(node)
+					node.children[key] = new_node
 					node = new_node
 					return
 
 				if type == RawToken.OPEN_ARRAY:
 					state = State.ARR_NONE
-					new_node = Node(NodeType.ARRAY, [], node)
-					node.nodeValue[key] = new_node
+					new_node = new_node = ArrayNode(node)
+					node.children[key] = new_node
 					node = new_node
 					return
 
@@ -124,18 +124,18 @@ def parse(text: str):
 			# Array state. Expects an item or a closing bracket.
 			case State.ARR_NONE:
 				if type == RawToken.QUOTED:
-					node.nodeValue.append(parse_to_node(node, value, True))
+					node.children.append(parse_to_node(node, value, True))
 					state = State.ARR_ITEM
 					return
 
 				if type == RawToken.UNQUOTED:
-					node.nodeValue.append(parse_to_node(node, value))
+					node.children.append(parse_to_node(node, value))
 					state = State.ARR_ITEM
 					return
 
 				if type == RawToken.CLOSE_ARRAY:
 					state = State.NONE
-					node = node.parentNode
+					node = node.parent
 					return
 
 				current_line, current_char = get_pos(text, ind)
@@ -150,7 +150,7 @@ def parse(text: str):
 
 				if type == RawToken.CLOSE_ARRAY:
 					state = State.NONE
-					node = node.parentNode
+					node = node.parent
 					return
 
 				current_line, current_char = get_pos(text, ind)
