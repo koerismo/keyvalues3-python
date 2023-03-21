@@ -14,9 +14,7 @@ class RawToken(Enum):
 	SHEBANG = 8
 
 RE_WHITESPACE = re.compile('[\\s\\t\\n\\r]')
-RE_QUOTE = re.compile('(?<!\\\\)"')
-RE_QUOTE_TRIPLE = re.compile('(?<!\\\\)"""')
-RE_PLAIN = re.compile('[\\da-z]', re.IGNORECASE)
+RE_PLAIN = re.compile('[\\da-z\\-\\\\]', re.IGNORECASE)
 RE_TERMINATE = re.compile('[\\s\\t\\n\\r\\{\\}\\[\\],]')
 RE_SHEBANG_END = re.compile('(?<!\\\\)\\-\\-\\>')
 RE_COMMENT_END = re.compile('(?<!\\\\)\\*/')
@@ -29,30 +27,28 @@ def tokenize(text: str, on_token: Callable):
 		i += 1
 		char = text[i]
 
-		escaped = (i != 0 and text[i-1] == '\\')
 		if RE_WHITESPACE.match(char): continue
 
 		# Your average control characters
-		if not escaped:
-			match char:
-				case '=':
-					on_token(RawToken.EQUALS, None, i)
-					continue
-				case '{':
-					on_token(RawToken.OPEN_OBJECT, None, i)
-					continue
-				case '}':
-					on_token(RawToken.CLOSE_OBJECT, None, i)
-					continue
-				case '[':
-					on_token(RawToken.OPEN_ARRAY, None, i)
-					continue
-				case ']':
-					on_token(RawToken.CLOSE_ARRAY, None, i)
-					continue
-				case ',':
-					on_token(RawToken.COMMA, None, i)
-					continue
+		match char:
+			case '=':
+				on_token(RawToken.EQUALS, None, i)
+				continue
+			case '{':
+				on_token(RawToken.OPEN_OBJECT, None, i)
+				continue
+			case '}':
+				on_token(RawToken.CLOSE_OBJECT, None, i)
+				continue
+			case '[':
+				on_token(RawToken.OPEN_ARRAY, None, i)
+				continue
+			case ']':
+				on_token(RawToken.CLOSE_ARRAY, None, i)
+				continue
+			case ',':
+				on_token(RawToken.COMMA, None, i)
+				continue
 
 		# Handle single-line comments
 		if text.startswith('//', i):
@@ -69,24 +65,33 @@ def tokenize(text: str, on_token: Callable):
 			continue
 
 		# Handle triple-quoted strings.
-		if text.startswith('\"\"\"', i):
+		if text.startswith('"""', i):
+			i += 3
 			start = i
-			end = RE_QUOTE_TRIPLE.search(text, i+3)
-			if end == None: raise ValueError(f'Could not resolve multiline quote starting at {start}!')
-			i = end.end()-1
-			on_token(RawToken.QUOTED, text[start+3:i-2], i)
+
+			while True:
+				if i+3 >= len(text): raise ValueError(f'Encountered unexpected EOF while waiting for end of multiline string starting at {start}!')
+				if text.startswith('"""', i): break
+				if text[i] == '\\': i += 1
+				i += 1
+
+			i += 3
+			on_token(RawToken.QUOTED, text[start:i-3], start)
 			continue
 
 		# Handle single-quoted strings.
 		if char == '"':
+			i += 1
 			start = i
-			end = RE_QUOTE.search(text, i+1)
-			if end == None: raise ValueError(f'Could not resolve quote starting at {start}!')
-			i = end.start()
 
-			next_newline = text.find('\n', start)
-			if next_newline != -1 and next_newline < i: raise ValueError(f'Unexpected newline at {next_newline}! Unclosed string starts at {start}.')
-			on_token(RawToken.QUOTED, text[start+1:i], i)
+			while True:
+				if i >= len(text): raise ValueError(f'Encountered unexpected EOF while waiting for end of string starting at {start}!')
+				if text[i] == '\n': raise ValueError(f'Encountered unexpected newline while waiting for end of string starting at {start}!')
+				if text[i] == '"': break
+				if text[i] == '\\': i += 1
+				i += 1
+
+			on_token(RawToken.QUOTED, text[start:i], i)
 			continue
 
 		# Handle shebang statement.
@@ -101,9 +106,12 @@ def tokenize(text: str, on_token: Callable):
 		# Handle non-quoted strings.
 		if RE_PLAIN.match(char):
 			start = i
+
 			while True:
+				if i >= len(text) or RE_TERMINATE.match(text, i): break
+				if text[i] == '\\': i += 1
 				i += 1
-				if i >= len(text) or (RE_TERMINATE.match(text, i) and text[i-1] != '\\'): break
+
 			on_token(RawToken.UNQUOTED, text[start:i], i)
 			i -= 1
 			continue
